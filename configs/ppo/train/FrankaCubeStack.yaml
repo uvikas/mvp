@@ -9,10 +9,10 @@ learn:
   agent_name: franka_ppo
   test: False
   resume: 0
-  save_interval: 50
+  save_interval: 100
   print_log: True
 
-  max_iterations: 1000
+  max_iterations: 10000
 
   cliprange: 0.1
   ent_coef: 0
@@ -20,7 +20,7 @@ learn:
   noptepochs: 10
   nminibatches: 4
   max_grad_norm: 1
-  optim_stepsize: 0.001
+  optim_stepsize: 0.0005
   schedule: cos
   gamma: 0.99
   lam: 0.95

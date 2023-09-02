@@ -70,9 +70,9 @@ class FrankaCubeStack(BaseTask):
         self.aggregate_mode = self.cfg["env"]["aggregateMode"]
 
         self.obs_type = self.cfg["env"]["obs_type"]
-        self.up_axis = "z"
-        self.up_axis_idx = 2
         self.dt = 1 / 60.
+
+        self.debug_viz = True
 
         # Create dicts to pass to reward function
         self.reward_settings = {
@@ -656,29 +656,29 @@ class FrankaCubeStack(BaseTask):
         self.compute_reward(self.actions)
 
         # # debug viz
-        # if self.viewer and self.debug_viz:
-        #     self.gym.clear_lines(self.viewer)
-        #     self.gym.refresh_rigid_body_state_tensor(self.sim)
+        if self.viewer and self.debug_viz:
+            self.gym.clear_lines(self.viewer)
+            self.gym.refresh_rigid_body_state_tensor(self.sim)
 
-        #     # Grab relevant states to visualize
-        #     eef_pos = self.states["eef_pos"]
-        #     eef_rot = self.states["eef_quat"]
-        #     cubeA_pos = self.states["cubeA_pos"]
-        #     cubeA_rot = self.states["cubeA_quat"]
-        #     cubeB_pos = self.states["cubeB_pos"]
-        #     cubeB_rot = self.states["cubeB_quat"]
+            # Grab relevant states to visualize
+            eef_pos = self.states["eef_pos"]
+            eef_rot = self.states["eef_quat"]
+            cubeA_pos = self.states["cubeA_pos"]
+            cubeA_rot = self.states["cubeA_quat"]
+            cubeB_pos = self.states["cubeB_pos"]
+            cubeB_rot = self.states["cubeB_quat"]
 
-        #     # Plot visualizations
-        #     for i in range(self.num_envs):
-        #         for pos, rot in zip((eef_pos, cubeA_pos, cubeB_pos), (eef_rot, cubeA_rot, cubeB_rot)):
-        #             px = (pos[i] + quat_apply(rot[i], to_torch([1, 0, 0], device=self.device) * 0.2)).cpu().numpy()
-        #             py = (pos[i] + quat_apply(rot[i], to_torch([0, 1, 0], device=self.device) * 0.2)).cpu().numpy()
-        #             pz = (pos[i] + quat_apply(rot[i], to_torch([0, 0, 1], device=self.device) * 0.2)).cpu().numpy()
+            # Plot visualizations
+            for i in range(self.num_envs):
+                for pos, rot in zip((eef_pos, cubeA_pos, cubeB_pos), (eef_rot, cubeA_rot, cubeB_rot)):
+                    px = (pos[i] + quat_apply(rot[i], to_torch([1, 0, 0], device=self.device) * 0.2)).cpu().numpy()
+                    py = (pos[i] + quat_apply(rot[i], to_torch([0, 1, 0], device=self.device) * 0.2)).cpu().numpy()
+                    pz = (pos[i] + quat_apply(rot[i], to_torch([0, 0, 1], device=self.device) * 0.2)).cpu().numpy()
 
-        #             p0 = pos[i].cpu().numpy()
-        #             self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], px[0], px[1], px[2]], [0.85, 0.1, 0.1])
-        #             self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], py[0], py[1], py[2]], [0.1, 0.85, 0.1])
-        #             self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], pz[0], pz[1], pz[2]], [0.1, 0.1, 0.85])
+                    p0 = pos[i].cpu().numpy()
+                    self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], px[0], px[1], px[2]], [0.85, 0.1, 0.1])
+                    self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], py[0], py[1], py[2]], [0.1, 0.85, 0.1])
+                    self.gym.add_lines(self.viewer, self.envs[i], 1, [p0[0], p0[1], p0[2], pz[0], pz[1], pz[2]], [0.1, 0.1, 0.85])
 
 #####################################################################
 ###=========================jit functions=========================###
@@ -700,11 +700,13 @@ def compute_franka_reward(
     d_lf = torch.norm(states["cubeA_pos"] - states["eef_lf_pos"], dim=-1)
     d_rf = torch.norm(states["cubeA_pos"] - states["eef_rf_pos"], dim=-1)
     dist_reward = 1 - torch.tanh(10.0 * (d + d_lf + d_rf) / 3)
+    # print('dist', torch.mean(d).item(), torch.mean(d_lf).item(), torch.mean(d_rf).item())
 
     # reward for lifting cubeA
     cubeA_height = states["cubeA_pos"][:, 2] - reward_settings["table_height"]
     cubeA_lifted = (cubeA_height - cubeA_size) > 0.04
     lift_reward = cubeA_lifted
+    # print('lift', torch.sum(lift_reward).item())
 
     # how closely aligned cubeA is to cubeB (only provided if cubeA is lifted)
     offset = torch.zeros_like(states["cubeA_to_cubeB_pos"])
@@ -730,11 +732,11 @@ def compute_franka_reward(
         reward_settings["r_dist_scale"] * dist_reward + reward_settings["r_lift_scale"] * lift_reward + reward_settings[
             "r_align_scale"] * align_reward
     ).detach()
-
-    print(torch.mean(rewards))
+    # print(torch.mean(rewards).item())
 
     # Compute resets
     reset_buf = torch.where((progress_buf >= max_episode_length - 1) | (stack_reward > 0), torch.ones_like(reset_buf), reset_buf)
+    # print("reset", torch.sum(reset_buf).item())
 
     # Compute successes
     s = torch.where(successes < 10.0, torch.zeros_like(successes), successes)

@@ -42,3 +42,12 @@ def quat_mul(a, b):
     quat = torch.stack([x, y, z, w], dim=-1).view(shape)
 
     return quat
+
+@torch.jit.script
+def quat_apply(a, b):
+    shape = b.shape
+    a = a.reshape(-1, 4)
+    b = b.reshape(-1, 3)
+    xyz = a[:, :3]
+    t = xyz.cross(b, dim=-1) * 2
+    return (b + a[:, 3:] * t + xyz.cross(t, dim=-1)).view(shape)

@@ -148,7 +148,6 @@ class PPO:
     def run(self, num_learning_iterations, log_interval=1):
         current_obs = self.vec_env.reset()
         current_states = self.vec_env.get_state()
-
         if self.is_testing:
             maxlen = 200
             cur_reward_sum = torch.zeros(self.vec_env.num_envs, dtype=torch.float, device=self.device)
