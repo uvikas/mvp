@@ -17,6 +17,7 @@ import torch
 
 from pixmc.tasks.base.vec_task import VecTaskPython
 from pixmc.tasks.franka_cabinet import FrankaCabinet
+from pixmc.tasks.franka_cube_stack import FrankaCubeStack
 from pixmc.tasks.franka_move import FrankaMove
 from pixmc.tasks.franka_pick import FrankaPick
 from pixmc.tasks.franka_pick_object import FrankaPickObject
@@ -35,6 +36,7 @@ from mvp.ppo import PixelActorCritic
 # Available tasks
 _TASK_MAP = {
     "FrankaCabinet": FrankaCabinet,
+    "FrankaCubeStack": FrankaCubeStack,
     "FrankaMove": FrankaMove,
     "FrankaPick": FrankaPick,
     "FrankaPickObject": FrankaPickObject,

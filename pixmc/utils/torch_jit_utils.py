@@ -6,6 +6,8 @@ import torch
 import numpy as np
 from isaacgym.torch_utils import *
 
+def to_torch(x, dtype=torch.float, device='cuda:0'):
+    return torch.tensor(x, dtype=dtype, device=device, requires_grad=False)
 
 @torch.jit.script
 def quat_axis(q, axis=0):
