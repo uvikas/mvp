@@ -69,6 +69,11 @@ class FrankaCubeStack(BaseTask):
         self.franka_dof_noise = self.cfg["env"]["frankaDofNoise"]
         self.aggregate_mode = self.cfg["env"]["aggregateMode"]
 
+        self.obs_type = self.cfg["env"]["obs_type"]
+        self.up_axis = "z"
+        self.up_axis_idx = 2
+        self.dt = 1 / 60.
+
         # Create dicts to pass to reward function
         self.reward_settings = {
             "r_dist_scale": self.cfg["env"]["distRewardScale"],
@@ -118,8 +123,6 @@ class FrankaCubeStack(BaseTask):
         self._effort_control = None         # Torque actions
         self._franka_effort_limits = None        # Actuator effort limits for franka
         self._global_indices = None         # Unique indices corresponding to all envs in flattened array
-
-        # self.debug_viz = self.cfg["env"]["enableDebugVis"]
 
         self.up_axis = "z"
         self.up_axis_idx = 2
@@ -430,8 +433,8 @@ class FrankaCubeStack(BaseTask):
         self._update_states()
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.reset_buf[:] = compute_franka_reward(
-            self.reset_buf, self.progress_buf, self.actions, self.states, self.reward_settings, self.max_episode_length
+        self.rew_buf[:], self.reset_buf[:], self.successes[:] = compute_franka_reward(
+            self.reset_buf, self.progress_buf, self.successes, self.actions, self.states, self.reward_settings, self.max_episode_length
         )
 
     def compute_observations(self):
@@ -439,8 +442,6 @@ class FrankaCubeStack(BaseTask):
         obs = ["cubeA_quat", "cubeA_pos", "cubeA_to_cubeB_pos", "eef_pos", "eef_quat"]
         obs += ["q_gripper"] if self.control_type == "osc" else ["q"]
         self.obs_buf = torch.cat([self.states[ob] for ob in obs], dim=-1)
-
-        # print("OBSERVATIONS BUF", [self.states[ob].requires_grad for ob in obs])
 
         maxs = {ob: torch.max(self.states[ob]).item() for ob in obs}
 
@@ -653,7 +654,6 @@ class FrankaCubeStack(BaseTask):
 
         self.compute_observations()
         self.compute_reward(self.actions)
-        # print(self.rew_buf)
 
         # # debug viz
         # if self.viewer and self.debug_viz:
@@ -687,10 +687,9 @@ class FrankaCubeStack(BaseTask):
 
 @torch.jit.script
 def compute_franka_reward(
-    reset_buf: Tensor, progress_buf: Tensor, actions: Tensor, states: Dict[str, Tensor], reward_settings: Dict[str, float], max_episode_length: float
-) -> Tuple[Tensor, Tensor]:
-    # type: (Tensor, Tensor, Tensor, Dict[str, Tensor], Dict[str, float], float) -> Tuple[Tensor, Tensor]
-    # print("REQUIRES GRAD:", reset_buf.requires_grad, progress_buf.requires_grad)
+    reset_buf: Tensor, progress_buf: Tensor, successes: Tensor, actions: Tensor, states: Dict[str, Tensor], reward_settings: Dict[str, float], max_episode_length: float
+) -> Tuple[Tensor, Tensor, Tensor]:
+    # type: (Tensor, Tensor, Tensor, Tensor, Dict[str, Tensor], Dict[str, float], float) -> Tuple[Tensor, Tensor, Tensor]
     # Compute per-env physical parameters
     target_height = states["cubeB_size"] + states["cubeA_size"] / 2.0
     cubeA_size = states["cubeA_size"]
@@ -704,17 +703,12 @@ def compute_franka_reward(
 
     # reward for lifting cubeA
     cubeA_height = states["cubeA_pos"][:, 2] - reward_settings["table_height"]
-    # print('cubeAheigh', cubeA_height.requires_grad)
     cubeA_lifted = (cubeA_height - cubeA_size) > 0.04
     lift_reward = cubeA_lifted
 
     # how closely aligned cubeA is to cubeB (only provided if cubeA is lifted)
-    # print(states["cubeA_to_cubeB_pos"].shape, cubeA_size.shape, cubeB_size.shape)
     offset = torch.zeros_like(states["cubeA_to_cubeB_pos"])
-    # print('offset before', offset.requires_grad, cubeA_size.requires_grad, cubeB_size.requires_grad, states["cubeA_to_cubeB_pos"].requires_grad)
-    # print(((cubeA_size + cubeB_size) / 2).requires_grad, (cubeA_size + cubeB_size).requires_grad, ((cubeA_size)).requires_grad)
     offset[:, 2] = (cubeA_size + cubeB_size) / 2
-    # print('offset', offset.requires_grad, cubeA_size.requires_grad, cubeB_size.requires_grad, states["cubeA_to_cubeB_pos"].requires_grad)
     d_ab = torch.norm(states["cubeA_to_cubeB_pos"] + offset, dim=-1)
     align_reward = (1 - torch.tanh(10.0 * d_ab)) * cubeA_lifted
 
@@ -726,15 +720,6 @@ def compute_franka_reward(
     cubeA_on_cubeB = torch.abs(cubeA_height - target_height) < 0.02
     gripper_away_from_cubeA = (d > 0.04)
     stack_reward = cubeA_align_cubeB & cubeA_on_cubeB & gripper_away_from_cubeA
-    
-    A = reward_settings["r_stack_scale"] * stack_reward
-    B = reward_settings["r_dist_scale"] * dist_reward + reward_settings["r_lift_scale"] * lift_reward + reward_settings[
-            "r_align_scale"] * align_reward
-    
-    # print("REWARD SETTINGS", (states["cubeA_pos"][:, 2] - reward_settings["table_height"]).requires_grad)
-    # print("REQUIRES GRAD obs", states["cubeA_pos"][:, 2].requires_grad, states["cubeA_to_cubeB_pos"].requires_grad)
-    # print("REQUIRES GRAD input:", d.requires_grad, d_lf.requires_grad, d_rf.requires_grad, cubeA_height.requires_grad, offset.requires_grad, d_ab.requires_grad)
-    # print("REQUIRES GRAD", stack_reward.requires_grad, A.requires_grad, B.requires_grad, dist_reward.requires_grad, lift_reward.requires_grad, align_reward.requires_grad)
 
     # Compose rewards
 
@@ -746,9 +731,15 @@ def compute_franka_reward(
             "r_align_scale"] * align_reward
     ).detach()
 
-    # print("REQUIRES GRAD", rewards.requires_grad)
+    print(torch.mean(rewards))
 
     # Compute resets
     reset_buf = torch.where((progress_buf >= max_episode_length - 1) | (stack_reward > 0), torch.ones_like(reset_buf), reset_buf)
 
-    return rewards, reset_buf
+    # Compute successes
+    s = torch.where(successes < 10.0, torch.zeros_like(successes), successes)
+    successes = torch.where(stack_reward, torch.ones_like(successes) + successes, s)
+    binary_s = torch.where(successes >= 10, torch.ones_like(successes), torch.zeros_like(successes))
+    successes = torch.where(reset_buf > 0, binary_s, successes).detach()
+
+    return rewards, reset_buf, successes

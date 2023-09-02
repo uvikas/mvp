@@ -526,7 +526,10 @@ def compute_franka_reward(
 
     # Goal reached
     goal_height = 0.8 - 0.4  # absolute goal height - table height
+
+    # Zero out unsuccessful entries
     s = torch.where(successes < 10.0, torch.zeros_like(successes), successes)
+    # ??? Wherever og distance < goal height, 1 + prev success count, otherwise keep prev success count
     successes = torch.where(og_d <= goal_height * 0.25, torch.ones_like(successes) + successes, s)
 
     # Object below table height
